@@ -4,7 +4,7 @@ using System.Runtime.InteropServices;
 namespace Nettrace
 {
     [StructLayout(LayoutKind.Sequential, Pack = 2)]
-    internal struct EventPipeTraceInformation
+    internal struct TraceObject
     {
         public short Year;
         public short Month;
@@ -18,6 +18,7 @@ namespace Nettrace
         public long QPCFrequency;
         public int PointerSize;
         public int ProcessId;
+        public int NumberOfProcessors;
         public int ExpectedCPUSamplingRate;
     }
 }

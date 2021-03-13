@@ -1,9 +1,10 @@
 ﻿namespace Nettrace
 {
-    internal enum State
+    public enum State
     {
         Preamble,
         StreamHeader,
-        Object
+        Object,
+        Completed
     }
 }

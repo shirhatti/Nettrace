@@ -11,7 +11,7 @@ namespace Nettrace
     internal struct EventBlobHeader
     {
         public int EventSize;
-        public int MetadatId;
+        public int MetadataId;
         public int SequenceId;
         public long ThreadId;
         public long CaptureThreadId;
@@ -21,5 +21,7 @@ namespace Nettrace
         public Guid ActivityId;
         public Guid RelatedActivityId;
         public int PayloadSize;
+
+        public bool IsMetadata() => MetadataId == 0; // 0 means that it's a metadata Id
     }
 }

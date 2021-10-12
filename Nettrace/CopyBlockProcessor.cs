@@ -14,8 +14,8 @@ namespace Nettrace
         private readonly string _filePath;
         private bool _initialized;
         private Stream? _stream;
-        private PipeWriter? _writer;
-        private long _bytesWritten;
+        private TrackingPipeWriter? _writer;
+
         public CopyBlockProcessor(string filePath)
         {
             _filePath = filePath;
@@ -24,13 +24,18 @@ namespace Nettrace
         private void Initialize()
         {
             _stream = File.OpenWrite(_filePath);
-            _writer = PipeWriter.Create(_stream);
-            // Write Preamble
-            Encoding.UTF8.GetBytes("Nettrace", _writer);
-            // Write StreamHeader
-            _writer.Write(BitConverter.GetBytes(20));
-            Encoding.UTF8.GetBytes("!FastSerialization.1", _writer);
+            _writer = new TrackingPipeWriter(PipeWriter.Create(_stream));
+            WriteInitialFileContext(_writer);
             _initialized = true;
+        }
+
+        static private void WriteInitialFileContext(TrackingPipeWriter writer)
+        {
+            // Write Preamble
+            Encoding.UTF8.GetBytes("Nettrace", writer);
+            // Write StreamHeader
+            writer.Write(BitConverter.GetBytes(20));
+            Encoding.UTF8.GetBytes("!FastSerialization.1", writer);
         }
 
         public void ProcessBlock(NettraceBlock block)
@@ -40,6 +45,7 @@ namespace Nettrace
                 Initialize();
             }
             Debug.Assert(_writer is not null);
+
             // Write opening tag
             _writer.WriteByte((byte)Tags.BeginPrivateObject);
 
@@ -52,20 +58,37 @@ namespace Nettrace
                 _writer.Write(BitConverter.GetBytes(block.Size));
 
                 // Write padding
-                Span<byte> span = stackalloc byte[(int)block.AlignmentPadding];
-                _writer.Write(span);
+                WritePadding(block);
             }
 
             ProcessBlockBody(block.BlockBody);
             
             // Write closing tag
             _writer.WriteByte((byte)Tags.EndObject);
+
+            // TODO: Async
+            _writer.FlushAsync().GetAwaiter().GetResult();
+        }
+
+        private void WritePadding(NettraceBlock block)
+        {
+            Debug.Assert(_writer is not null);
+
+            // Write padding
+            Debug.Assert(block.AlignmentPadding < 5);
+            var offset = _writer.WrittenCount % 4;
+            var padding = (4 - offset) % 4;
+            // Remove when doing file rolling, just here for sanity for now
+            Debug.Assert(block.AlignmentPadding == padding);
+            Span<byte> span = stackalloc byte[(int)padding];
+            _writer.Write(span);
         }
 
         private void ProcessBlockHeader(NettraceType type)
         {
             /*
             [open tag]
+                [nullreference tag]
                 [type version]
                 [minReader Version]
                 [length of block name]

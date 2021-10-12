@@ -157,7 +157,7 @@ namespace Nettrace
             {
                 return false;
             }
-            var padding = PerformFourByteAllignment(ref sequenceReader);
+            var padding = PerformFourByteAlignment(ref sequenceReader);
 
             // TODO: Parse the block
             if (BlockSize > sequenceReader.Remaining)
@@ -184,7 +184,7 @@ namespace Nettrace
             return true;
         }
 
-        private long PerformFourByteAllignment(ref SequenceReader<byte> sequenceReader)
+        private long PerformFourByteAlignment(ref SequenceReader<byte> sequenceReader)
         {
             var offset = (BytesConsumed + sequenceReader.Consumed) % 4;
             var padding = (4 - offset) % 4;
@@ -202,7 +202,7 @@ namespace Nettrace
                 return false;
             }
 
-            var padding = PerformFourByteAllignment(ref sequenceReader);
+            var padding = PerformFourByteAlignment(ref sequenceReader);
 
             if (BlockSize > sequenceReader.Remaining)
             {

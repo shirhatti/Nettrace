@@ -12,6 +12,7 @@ namespace Nettrace
         private bool _initialized;
         private Stream? _stream;
         private PipeWriter? _writer;
+        private long _bytesWritten;
         public CopyBlockProcessor(string filePath)
         {
             _filePath = filePath;
@@ -28,19 +29,38 @@ namespace Nettrace
             Encoding.UTF8.GetBytes("!FastSerialization.1", _writer);
             _initialized = true;
         }
-        public void ProcessBlock(ReadOnlySequence<byte> blockSequence, string blockName)
+        public void ProcessBlock(NettraceBlock block)
         {
             if (!_initialized)
             {
                 Initialize();
             }
+            if (_writer is null)
+            {
+                throw new InvalidOperationException();
+            }
             // Write opening tag
-            _writer!.Write(BitConverter.GetBytes((byte)Tags.BeginPrivateObject));
+            _writer.Write(BitConverter.GetBytes((byte)Tags.BeginPrivateObject));
 
-            ProcessBlockInternal(blockSequence);
+            // TODO: Write block header
+            //ProcessBlockHeader(block.Type);
+
+            // Write padding
+            Span<byte> span = stackalloc byte[(int)block.AlignmentPadding];
+            _writer.Write(span);
+
+            ProcessBlockBody(block.BlockBody);
+            
+            // Write opening tag
+            _writer.Write(BitConverter.GetBytes((byte)Tags.EndObject));
         }
 
-        private void ProcessBlockInternal(ReadOnlySequence<byte> blockSequence)
+        private void ProcessBlockHeader(NettraceType type)
+        {
+            throw new NotImplementedException();
+        }
+
+        private void ProcessBlockBody(ReadOnlySequence<byte> blockSequence)
         {
             foreach (var memory in blockSequence)
             {

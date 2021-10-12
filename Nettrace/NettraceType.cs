@@ -1,6 +1,6 @@
 ﻿namespace Nettrace
 {
-    internal struct NettraceType
+    public struct NettraceType
     {
         public readonly int Version { get; init; }
         public readonly int MinimumReaderVersion { get; init; }

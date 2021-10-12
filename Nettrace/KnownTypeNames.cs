@@ -9,11 +9,11 @@ namespace Nettrace
 {
     internal static class KnownTypeNames
     {
-        public static readonly string Trace = nameof(Trace);
-        public static readonly string MetadataBlock = nameof(MetadataBlock);
-        public static readonly string StackBlock = nameof(StackBlock);
-        public static readonly string EventBlock = nameof(EventBlock);
-        public static readonly string SPBlock = nameof(SPBlock);
+        public const string Trace = nameof(Trace);
+        public const string MetadataBlock = nameof(MetadataBlock);
+        public const string StackBlock = nameof(StackBlock);
+        public const string EventBlock = nameof(EventBlock);
+        public const string SPBlock = nameof(SPBlock);
         public static string? OptimisticMatching(byte firstByte, int length)
         {
             return ((char)firstByte, length) switch

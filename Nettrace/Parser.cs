@@ -18,6 +18,7 @@ namespace Nettrace
         private ILogger _logger;
         private int? _readAtLeast = null;
         private readonly IBlockProcessor _blockProcessor = new CopyBlockProcessor(@"C:\temp\temp.dat");
+        private NettraceBlock? _currentBlock = null;
         public long BytesConsumed { get; private set; } = 0;
         public State State { get; private set; } = State.Preamble;
         public Parser() : this(NullLogger.Instance) { }
@@ -48,6 +49,11 @@ namespace Nettrace
                 // Console.WriteLine($"\t{parseResult}");
                 if (parseResult)
                 {
+                    if (_currentBlock is not null)
+                    {
+                        _blockProcessor.ProcessBlock(_currentBlock.Value);
+                        _currentBlock = null;
+                    }
                     examined = position;
                     consumed = position;
                 }
@@ -132,39 +138,24 @@ namespace Nettrace
                 return false;
             }
             _logger.LogInformation("Found block of type: {type}", type.Name);
-            if (Equals(type.Name, KnownTypeNames.Trace))
+            return type.Name switch
             {
-                return TryReadTraceObject(ref sequenceReader);
-            }
-            else if (Equals(type.Name, KnownTypeNames.MetadataBlock))
-            {
-                return TryReadMetadataBlock(ref sequenceReader);
-            }
-            else if (Equals(type.Name, KnownTypeNames.StackBlock))
-            {
-                return TryReadUnknownBlock(ref sequenceReader, KnownTypeNames.StackBlock);
-            }
-            else if (Equals(type.Name, KnownTypeNames.EventBlock))
-            {
-                return TryReadUnknownBlock(ref sequenceReader, KnownTypeNames.EventBlock);
-            }
-            else if (Equals(type.Name, KnownTypeNames.SPBlock))
-            {
-                return TryReadUnknownBlock(ref sequenceReader, KnownTypeNames.EventBlock);
-            }
-            // Unreachable code
-            Debug.Assert(false);
-            return true;
+                KnownTypeNames.Trace => TryReadTraceObject(ref sequenceReader, type),
+                KnownTypeNames.MetadataBlock => TryReadUnknownBlock(ref sequenceReader, type),
+                KnownTypeNames.EventBlock => TryReadUnknownBlock(ref sequenceReader, type),
+                KnownTypeNames.StackBlock => TryReadUnknownBlock(ref sequenceReader, type),
+                KnownTypeNames.SPBlock => TryReadUnknownBlock(ref sequenceReader, type),
+                _ => throw new InvalidDataException("Unknown type encountered")
+            };
         }
 
-        private bool TryReadUnknownBlock(ref SequenceReader<byte> sequenceReader, string blockName)
+        private bool TryReadUnknownBlock(ref SequenceReader<byte> sequenceReader, NettraceType type)
         {
             if (!sequenceReader.TryReadLittleEndian(out int BlockSize))
             {
                 return false;
             }
-            PerformFourByteAllignment(ref sequenceReader);
-
+            var padding = PerformFourByteAllignment(ref sequenceReader);
 
             // TODO: Parse the block
             if (BlockSize > sequenceReader.Remaining)
@@ -173,8 +164,15 @@ namespace Nettrace
                 return false;
             }
             var blockSequence = sequenceReader.UnreadSequence.Slice(0, BlockSize);
-            _blockProcessor.ProcessBlock(blockSequence, blockName);
-            //using var block = BlockWrapper.Create(ref sequenceReader, BlockSize);
+            var block = new NettraceBlock()
+            {
+                Type = type,
+                AlignmentPadding = padding,
+                Size = BlockSize,
+                BlockBody = blockSequence
+            };
+            _currentBlock = block;
+            //_blockProcessor.ProcessBlock(block);
             sequenceReader.Advance(BlockSize);
             if (!sequenceReader.TryRead(out var tagValue))
             {
@@ -184,13 +182,15 @@ namespace Nettrace
             return true;
         }
 
-        private void PerformFourByteAllignment(ref SequenceReader<byte> sequenceReader)
+        private long PerformFourByteAllignment(ref SequenceReader<byte> sequenceReader)
         {
             var offset = (BytesConsumed + sequenceReader.Consumed) % 4;
-            if (offset != 0)
+            var padding = (4 - offset) % 4;
+            if (padding != 0)
             {
-                sequenceReader.Advance(4 - offset);
+                sequenceReader.Advance(padding);
             }
+            return padding;
         }
 
         private bool TryReadMetadataBlock(ref SequenceReader<byte> sequenceReader)
@@ -200,7 +200,7 @@ namespace Nettrace
                 return false;
             }
 
-            PerformFourByteAllignment(ref sequenceReader);
+            var padding = PerformFourByteAllignment(ref sequenceReader);
 
             if (BlockSize > sequenceReader.Remaining)
             {
@@ -397,7 +397,7 @@ namespace Nettrace
             return true;
         }
 
-        private bool TryReadTraceObject(ref SequenceReader<byte> sequenceReader)
+        private bool TryReadTraceObject(ref SequenceReader<byte> sequenceReader, NettraceType type)
         {
             var trace = new TraceObject();
             var span = MemoryMarshal.Cast<TraceObject, byte>(MemoryMarshal.CreateSpan(ref trace, 1));
@@ -406,8 +406,19 @@ namespace Nettrace
             {
                 return false;
             }
-            sequenceReader.Advance(span.Length);
 
+            var blockSize = span.Length;
+            var blockSequence = sequenceReader.UnreadSequence.Slice(0, blockSize);
+            var block = new NettraceBlock()
+            {
+                Type = type,
+                AlignmentPadding = 0,
+                Size = blockSize,
+                BlockBody = blockSequence
+            };
+            _currentBlock = block;
+
+            sequenceReader.Advance(span.Length);
             if (!sequenceReader.TryRead(out var tagValue))
             {
                 return false;

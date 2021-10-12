@@ -1,4 +1,7 @@
-﻿using System;
+﻿using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
+
+using System;
 using System.Buffers;
 using System.Diagnostics;
 using System.IO;
@@ -7,39 +10,41 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
-using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Nettrace
 {
-    public class Parser
+    public class Parser : IDisposable
     {
-        private ParserContext _context;
         private ILogger _logger;
-
-        public Parser() : this (NullLogger.Instance) { }
-        public Parser(ILogger logger)
-        {
-            _logger = logger;
-            _context = new ParserContext()
-            {
-                BytesConsumed = 0,
-                State = State.Preamble
-            };
-        }
-        public async Task ProcessAsync(Stream stream)
+        private int? _readAtLeast = null;
+        private readonly IBlockProcessor _blockProcessor = new CopyBlockProcessor(@"C:\temp\temp.dat");
+        public long BytesConsumed { get; private set; } = 0;
+        public State State { get; private set; } = State.Preamble;
+        public Parser() : this(NullLogger.Instance) { }
+        public Parser(ILogger logger) => _logger = logger;
+        public async Task ProcessAsync(Stream stream, CancellationToken token = default)
         {
             var reader = PipeReader.Create(stream);
             while (true)
             {
-                ReadResult result = await reader.ReadAsync();
-
+                ReadResult result;
+                if (_readAtLeast.HasValue)
+                {
+                    result = await reader.ReadAtLeastAsync(_readAtLeast.Value, token);
+                    _readAtLeast = null;
+                }
+                else
+                {
+                    result = await reader.ReadAsync(token);
+                }
+                _logger.LogTrace("Buffer length: {length}", result.Buffer.Length);
                 // In the event that no message is parsed successfully, mark consumed
                 // as nothing and examined as the entire buffer.
                 SequencePosition consumed = result.Buffer.Start;
                 SequencePosition examined = result.Buffer.End;
 
                 var parseResult = TryParse(result, out var position);
+
                 // Console.WriteLine($"\t{parseResult}");
                 if (parseResult)
                 {
@@ -66,7 +71,7 @@ namespace Nettrace
             position = default;
             var buffer = readResult.Buffer;
             var sequenceReader = new SequenceReader<byte>(buffer);
-            var result = _context.State switch
+            var result = State switch
             {
                 State.Preamble => TryReadPreamble(ref sequenceReader),
                 State.StreamHeader => TryReadStreamHeader(ref sequenceReader),
@@ -77,7 +82,7 @@ namespace Nettrace
             position = sequenceReader.Position;
             if (result)
             {
-                _context.BytesConsumed += sequenceReader.Consumed;
+                BytesConsumed += sequenceReader.Consumed;
             }
             return result;
         }
@@ -89,7 +94,7 @@ namespace Nettrace
                 return false;
             }
             Debug.Assert(name == "Nettrace");
-            _context.State = State.StreamHeader;
+            State = State.StreamHeader;
             return true;
         }
 
@@ -100,7 +105,7 @@ namespace Nettrace
                 return false;
             }
             Debug.Assert(name == "!FastSerialization.1");
-            _context.State = State.Object;
+            State = State.Object;
             return true;
         }
 
@@ -117,7 +122,7 @@ namespace Nettrace
 
             if (tag == Tags.NullReference)
             {
-                _context.State = State.Completed;
+                State = State.Completed;
                 return true;
             }
 
@@ -126,7 +131,7 @@ namespace Nettrace
             {
                 return false;
             }
-            // Console.WriteLine(type.Name);
+            _logger.LogInformation("Found block of type: {type}", type.Name);
             if (Equals(type.Name, KnownTypeNames.Trace))
             {
                 return TryReadTraceObject(ref sequenceReader);
@@ -137,40 +142,40 @@ namespace Nettrace
             }
             else if (Equals(type.Name, KnownTypeNames.StackBlock))
             {
-                return TryReadUnknownBlock(ref sequenceReader);
+                return TryReadUnknownBlock(ref sequenceReader, KnownTypeNames.StackBlock);
             }
             else if (Equals(type.Name, KnownTypeNames.EventBlock))
             {
-                return TryReadUnknownBlock(ref sequenceReader);
+                return TryReadUnknownBlock(ref sequenceReader, KnownTypeNames.EventBlock);
             }
             else if (Equals(type.Name, KnownTypeNames.SPBlock))
             {
-                return TryReadUnknownBlock(ref sequenceReader);
+                return TryReadUnknownBlock(ref sequenceReader, KnownTypeNames.EventBlock);
             }
+            // Unreachable code
+            Debug.Assert(false);
             return true;
         }
 
-        private bool TryReadUnknownBlock(ref SequenceReader<byte> sequenceReader)
+        private bool TryReadUnknownBlock(ref SequenceReader<byte> sequenceReader, string blockName)
         {
             if (!sequenceReader.TryReadLittleEndian(out int BlockSize))
             {
                 return false;
             }
-            var offset = (_context.BytesConsumed + sequenceReader.Consumed) % 4;
-            if (offset != 0)
-            {
-                //Perform 4-byte alignment
-                sequenceReader.Advance(4 - offset);
-            }
+            PerformFourByteAllignment(ref sequenceReader);
 
 
-            // TODO: Parse the StackBlock
+            // TODO: Parse the block
             if (BlockSize > sequenceReader.Remaining)
             {
+                _readAtLeast = BlockSize+1;
                 return false;
             }
+            var blockSequence = sequenceReader.UnreadSequence.Slice(0, BlockSize);
+            _blockProcessor.ProcessBlock(blockSequence, blockName);
+            //using var block = BlockWrapper.Create(ref sequenceReader, BlockSize);
             sequenceReader.Advance(BlockSize);
-
             if (!sequenceReader.TryRead(out var tagValue))
             {
                 return false;
@@ -179,18 +184,31 @@ namespace Nettrace
             return true;
         }
 
+        private void PerformFourByteAllignment(ref SequenceReader<byte> sequenceReader)
+        {
+            var offset = (BytesConsumed + sequenceReader.Consumed) % 4;
+            if (offset != 0)
+            {
+                sequenceReader.Advance(4 - offset);
+            }
+        }
+
         private bool TryReadMetadataBlock(ref SequenceReader<byte> sequenceReader)
         {
             if (!sequenceReader.TryReadLittleEndian(out int BlockSize))
             {
                 return false;
             }
-            var offset = (_context.BytesConsumed + sequenceReader.Consumed) % 4;
-            if (offset != 0)
+
+            PerformFourByteAllignment(ref sequenceReader);
+
+            if (BlockSize > sequenceReader.Remaining)
             {
-                //Perform 4-byte alignment
-                sequenceReader.Advance(4 - offset);
+                return false;
             }
+
+            //using var block = BlockWrapper.Create(ref sequenceReader, BlockSize);
+
             if (!TryReadEventBlockHeader(ref sequenceReader, out var EventBlockHeader))
             {
                 return false;
@@ -210,7 +228,7 @@ namespace Nettrace
                 //while (remainingData > 0)
                 //{
                 //    var blobStartPosition = sequenceReader.Consumed;
-                    
+
                 //    if (!TryReadEventBlobHeader(ref sequenceReader, EventBlockHeader, ref eventBlobHeader))
                 //    {
                 //        return false;
@@ -247,12 +265,30 @@ namespace Nettrace
                                     out MetadataEvent metadataEvent)
         {
             metadataEvent = new MetadataEvent();
-            sequenceReader.TryReadLittleEndian(out metadataEvent.MetaDataId);
-            sequenceReader.TryReadNullTerminatedUnicodeString(out metadataEvent.ProviderName);
-            sequenceReader.TryReadLittleEndian(out metadataEvent.EventId);
-            sequenceReader.TryReadNullTerminatedUnicodeString(out metadataEvent.EventName);
-            sequenceReader.TryReadLittleEndian(out metadataEvent.Keywords);
-            sequenceReader.TryReadLittleEndian(out metadataEvent.Level);
+            if (!sequenceReader.TryReadLittleEndian(out metadataEvent.MetaDataId))
+            {
+                return false;
+            }
+            if (!sequenceReader.TryReadNullTerminatedUnicodeString(out metadataEvent.ProviderName))
+            {
+                return false;
+            }
+            if (!sequenceReader.TryReadLittleEndian(out metadataEvent.EventId))
+            {
+                return false;
+            }
+            if (!sequenceReader.TryReadNullTerminatedUnicodeString(out metadataEvent.EventName))
+            {
+                return false;
+            }
+            if (!sequenceReader.TryReadLittleEndian(out metadataEvent.Keywords))
+            {
+                return false;
+            }
+            if (!sequenceReader.TryReadLittleEndian(out metadataEvent.Level))
+            {
+                return false;
+            }
             return true;
         }
 
@@ -261,20 +297,35 @@ namespace Nettrace
                                             ref EventBlobHeader blobHeader)
         {
             Debug.Assert((eventBlockHeader.Flags & 1) != 0);
-            
-            sequenceReader.TryRead(out var flags);
+
+            if (!sequenceReader.TryRead(out var flags))
+            {
+                return false;
+            }
 
             if ((flags & (byte)CompressedHeaderFlags.MetadataId) != 0)
             {
-                sequenceReader.TryReadVarInt32(out blobHeader.MetadataId);
+                if (!sequenceReader.TryReadVarInt32(out blobHeader.MetadataId))
+                {
+                    return false;
+                }
             }
             if ((flags & (byte)CompressedHeaderFlags.CaptureThreadAndSequence) != 0)
             {
-                sequenceReader.TryReadVarInt32(out var sequenceIdDelta);
+                if (!sequenceReader.TryReadVarInt32(out var sequenceIdDelta))
+                {
+                    return false;
+                }
                 blobHeader.SequenceId += sequenceIdDelta + 1;
 
-                sequenceReader.TryReadVarInt64(out blobHeader.ThreadId);
-                sequenceReader.TryReadVarInt32(out blobHeader.ProcessorNumber);
+                if (!sequenceReader.TryReadVarInt64(out blobHeader.ThreadId))
+                {
+                    return false;
+                }
+                if (!sequenceReader.TryReadVarInt32(out blobHeader.ProcessorNumber))
+                {
+                    return false;
+                }
             }
             else
             {
@@ -286,14 +337,23 @@ namespace Nettrace
 
             if ((flags & (byte)CompressedHeaderFlags.ThreadId) != 0)
             {
-                sequenceReader.TryReadVarInt64(out blobHeader.CaptureThreadId);
+                if (!sequenceReader.TryReadVarInt64(out blobHeader.CaptureThreadId))
+                {
+                    return false;
+                }
             }
 
             if ((flags & (byte)CompressedHeaderFlags.StackId) != 0)
             {
-                sequenceReader.TryReadVarInt32(out blobHeader.StackId);
+                if (!sequenceReader.TryReadVarInt32(out blobHeader.StackId))
+                {
+                    return false;
+                }
             }
-            sequenceReader.TryReadVarInt64(out var timeStampDelta);
+            if (!sequenceReader.TryReadVarInt64(out var timeStampDelta))
+            {
+                return false;
+            }
             blobHeader.TimeStamp += timeStampDelta;
 
             if ((flags & (byte)CompressedHeaderFlags.ActivityId) != 0)
@@ -310,7 +370,10 @@ namespace Nettrace
 
             if ((flags & (byte)CompressedHeaderFlags.DataLength) != 0)
             {
-                sequenceReader.TryReadVarInt32(out blobHeader.PayloadSize);
+                if (!sequenceReader.TryReadVarInt32(out blobHeader.PayloadSize))
+                {
+                    return false;
+                }
             }
             return true;
         }
@@ -416,5 +479,9 @@ namespace Nettrace
             return true;
         }
 
+        public void Dispose()
+        {
+            (_blockProcessor as IDisposable)?.Dispose();
+        }
     }
 }

@@ -83,7 +83,7 @@ namespace System.Buffers
         public static bool TryReadNullTerminatedUnicodeString(
             ref this SequenceReader<byte> reader, out string value)
         {
-            value = default;
+            value = string.Empty;
             int length = 0;
             int remaining;
             while (length < 1024)
@@ -112,7 +112,7 @@ namespace System.Buffers
         public static bool TryReadLengthPrefixedUtf8String(
             ref this SequenceReader<byte> reader, out string value)
         {
-            value = default;
+            value = string.Empty;
             if(!reader.TryReadLittleEndian(out int length))
             {
                 return false;
@@ -142,7 +142,7 @@ namespace System.Buffers
         private static unsafe bool TryReadMultisegmentString(
             ref SequenceReader<byte> reader, int size, Encoding encoding, out string value)
         {
-            value = default;
+            value = string.Empty;
             Debug.Assert(reader.UnreadSpan.Length < size);
             // TODO sanitize input. Large length could cause stack overflow
             Span<byte> buffer = stackalloc byte[size];

@@ -14,7 +14,6 @@ namespace Nettrace
     {
         private readonly EventBlockHeader _blockHeader;
         private long _offset;
-        private readonly ParserContext _context;
         private readonly byte[] _buffer;
         private readonly ILogger _logger;
 

@@ -14,7 +14,7 @@ namespace Nettrace
         public static readonly string StackBlock = nameof(StackBlock);
         public static readonly string EventBlock = nameof(EventBlock);
         public static readonly string SPBlock = nameof(SPBlock);
-        public static string OptimisticMatching(byte firstByte, int length)
+        public static string? OptimisticMatching(byte firstByte, int length)
         {
             return ((char)firstByte, length) switch
             {

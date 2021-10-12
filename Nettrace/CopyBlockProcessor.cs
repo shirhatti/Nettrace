@@ -1,7 +1,10 @@
 ﻿using System;
 using System.Buffers;
+using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.IO.Pipelines;
+using System.Runtime.InteropServices;
 using System.Text;
 
 namespace Nettrace
@@ -17,7 +20,7 @@ namespace Nettrace
         {
             _filePath = filePath;
         }
-
+        [MemberNotNull(nameof(_writer))]
         private void Initialize()
         {
             _stream = File.OpenWrite(_filePath);
@@ -29,35 +32,54 @@ namespace Nettrace
             Encoding.UTF8.GetBytes("!FastSerialization.1", _writer);
             _initialized = true;
         }
+
         public void ProcessBlock(NettraceBlock block)
         {
             if (!_initialized)
             {
                 Initialize();
             }
-            if (_writer is null)
-            {
-                throw new InvalidOperationException();
-            }
+            Debug.Assert(_writer is not null);
             // Write opening tag
-            _writer.Write(BitConverter.GetBytes((byte)Tags.BeginPrivateObject));
+            _writer.WriteByte((byte)Tags.BeginPrivateObject);
 
             // TODO: Write block header
-            //ProcessBlockHeader(block.Type);
+            ProcessBlockHeader(block.Type);
 
-            // Write padding
-            Span<byte> span = stackalloc byte[(int)block.AlignmentPadding];
-            _writer.Write(span);
+            if (block.Type.Name != KnownTypeNames.Trace)
+            {
+                // Write block size
+                _writer.Write(BitConverter.GetBytes(block.Size));
+
+                // Write padding
+                Span<byte> span = stackalloc byte[(int)block.AlignmentPadding];
+                _writer.Write(span);
+            }
 
             ProcessBlockBody(block.BlockBody);
             
-            // Write opening tag
-            _writer.Write(BitConverter.GetBytes((byte)Tags.EndObject));
+            // Write closing tag
+            _writer.WriteByte((byte)Tags.EndObject);
         }
 
         private void ProcessBlockHeader(NettraceType type)
         {
-            throw new NotImplementedException();
+            /*
+            [open tag]
+                [type version]
+                [minReader Version]
+                [length of block name]
+                [block name]
+            [close tag]
+            */
+            Debug.Assert(_writer is not null);
+            _writer.WriteByte((byte)Tags.BeginPrivateObject);
+            _writer.WriteByte((byte)Tags.NullReference);
+            _writer.Write(BitConverter.GetBytes(type.Version));
+            _writer.Write(BitConverter.GetBytes(type.MinimumReaderVersion));
+            _writer.Write(BitConverter.GetBytes(type.Name.Length));
+            Encoding.UTF8.GetBytes(type.Name, _writer);
+            _writer.WriteByte((byte)Tags.EndObject);
         }
 
         private void ProcessBlockBody(ReadOnlySequence<byte> blockSequence)
@@ -72,8 +94,8 @@ namespace Nettrace
         {
             if (_writer is not null)
             {
-                // Write closing tag
-                _writer.Write(BitConverter.GetBytes((byte)Tags.NullReference));
+                // Write null reference tag
+                _writer.WriteByte((byte)Tags.NullReference);
 
                 _writer.Complete();
             }

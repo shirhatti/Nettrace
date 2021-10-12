@@ -17,7 +17,7 @@ namespace Nettrace
     {
         private ILogger _logger;
         private int? _readAtLeast = null;
-        private readonly IBlockProcessor _blockProcessor = new CopyBlockProcessor(@"C:\temp\temp.dat");
+        private readonly IBlockProcessor _blockProcessor = new CopyBlockProcessor(@"temp.nettrace");
         private NettraceBlock? _currentBlock = null;
         public long BytesConsumed { get; private set; } = 0;
         public State State { get; private set; } = State.Preamble;
@@ -43,6 +43,8 @@ namespace Nettrace
                 // as nothing and examined as the entire buffer.
                 SequencePosition consumed = result.Buffer.Start;
                 SequencePosition examined = result.Buffer.End;
+
+                // Try adding loop around try parse
 
                 var parseResult = TryParse(result, out var position);
 

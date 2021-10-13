@@ -62,7 +62,6 @@ namespace Nettrace
             // Write closing tag
             _writer.WriteByte((byte)Tags.EndObject);
 
-            // TODO: Async
             await _writer.FlushAsync(token);
         }
 

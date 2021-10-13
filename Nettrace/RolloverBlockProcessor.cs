@@ -106,7 +106,6 @@ namespace Nettrace
             Debug.Assert(_writer is not null);
 
             // Write padding
-            Debug.Assert(block.AlignmentPadding < 5);
             var offset = _writer.WrittenCount % 4;
             var padding = (4 - offset) % 4;
             Span<byte> span = stackalloc byte[(int)padding];

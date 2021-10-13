@@ -13,6 +13,8 @@ namespace Nettrace
         public const string MetadataBlock = nameof(MetadataBlock);
         public const string StackBlock = nameof(StackBlock);
         public const string EventBlock = nameof(EventBlock);
+        public const string EventBlockCompressed = nameof(EventBlockCompressed);
+        public const string StackBlockCompressed = nameof(StackBlockCompressed);
         public const string SPBlock = nameof(SPBlock);
         public static string? OptimisticMatching(byte firstByte, int length)
         {
@@ -22,6 +24,8 @@ namespace Nettrace
                 ('M', 13) => MetadataBlock,
                 ('S', 10) => StackBlock,
                 ('E', 10) => EventBlock,
+                ('E', 20) => EventBlockCompressed,
+                ('S', 20) => StackBlockCompressed,
                 ('S', 7) => SPBlock,
                 _ => default
             };

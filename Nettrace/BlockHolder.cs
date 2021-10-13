@@ -16,7 +16,6 @@ namespace Nettrace
             blockWrapper.Block = new NettraceBlock()
             {
                 Type = nettraceBlock.Type,
-                AlignmentPadding = nettraceBlock.AlignmentPadding,
                 Size = nettraceBlock.Size,
                 BlockBody = blockWrapper.BlockBuffer
             };

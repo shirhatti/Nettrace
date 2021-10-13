@@ -3,8 +3,10 @@ using Microsoft.Extensions.Logging.Abstractions;
 
 using System;
 using System.Buffers;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.IO.Compression;
 using System.IO.Pipelines;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -15,8 +17,10 @@ namespace Nettrace
 {
     public class Parser : IDisposable
     {
+        private Dictionary<string, int> _stats = new();
         private ILogger _logger;
         private int? _readAtLeast = null;
+        private readonly IBlockProcessor _blockProcessor;
         private NettraceBlock? _currentBlock = null;
         public long BytesConsumed { get; private set; } = 0;
         public State State { get; private set; } = State.Preamble;
@@ -144,11 +148,15 @@ namespace Nettrace
                 return false;
             }
             _logger.LogInformation("Found block of type: {type}", type.Name);
+            _stats.TryAdd(type.Name, 0);
+            _stats[type.Name] += 1;
             return type.Name switch
             {
                 KnownTypeNames.Trace => TryReadTraceObject(ref sequenceReader, type),
                 KnownTypeNames.MetadataBlock => TryReadUnknownBlock(ref sequenceReader, type),
                 KnownTypeNames.EventBlock => TryReadUnknownBlock(ref sequenceReader, type),
+                KnownTypeNames.EventBlockCompressed => TryReadUnknownBlock(ref sequenceReader, type),
+                KnownTypeNames.StackBlockCompressed => TryReadUnknownBlock(ref sequenceReader, type),
                 KnownTypeNames.StackBlock => TryReadUnknownBlock(ref sequenceReader, type),
                 KnownTypeNames.SPBlock => TryReadUnknownBlock(ref sequenceReader, type),
                 _ => throw new InvalidDataException("Unknown type encountered")
@@ -161,7 +169,7 @@ namespace Nettrace
             {
                 return false;
             }
-            var padding = PerformFourByteAlignment(ref sequenceReader);
+            PerformFourByteAlignment(ref sequenceReader);
 
             // TODO: Parse the block
             if (BlockSize > sequenceReader.Remaining)
@@ -170,16 +178,22 @@ namespace Nettrace
                 return false;
             }
             var blockSequence = sequenceReader.UnreadSequence.Slice(0, BlockSize);
+            var originalBlockSize = BlockSize;
+
+            if (type.Name == KnownTypeNames.EventBlockCompressed || type.Name == KnownTypeNames.StackBlockCompressed)
+            {
+                type = Decompress(ref blockSequence, type);
+            }
+
             var block = new NettraceBlock()
             {
                 Type = type,
-                AlignmentPadding = padding,
-                Size = BlockSize,
+                Size = (int)blockSequence.Length,
                 BlockBody = blockSequence
             };
             _currentBlock = block;
             //_blockProcessor.ProcessBlock(block);
-            sequenceReader.Advance(BlockSize);
+            sequenceReader.Advance(originalBlockSize);
             if (!sequenceReader.TryRead(out var tagValue))
             {
                 return false;
@@ -188,7 +202,37 @@ namespace Nettrace
             return true;
         }
 
-        private long PerformFourByteAlignment(ref SequenceReader<byte> sequenceReader)
+        private NettraceType Decompress(ref ReadOnlySequence<byte> blockSequence, NettraceType type)
+        {
+            using var strm = new BrotliStream(new MemoryStream(blockSequence.ToArray()), CompressionMode.Decompress);
+            //var buf = new byte[100000];
+            //using var decoder = new BrotliDecoder();
+            //var totalWritten = 0;
+            //foreach (var sequence in blockSequence)
+            //{
+            //    OperationStatus status;
+            //    do
+            //    {
+            //        status = decoder.Decompress(sequence.Span, buf, out var consumed, out var written);
+            //        totalWritten += written;
+            //    }
+            //    while (status != OperationStatus.Done && status != OperationStatus.DestinationTooSmall);
+            //    //decoder.Decompress(sequence.Span, , out var consumed, out var written);
+            //    //Debug.Assert(consumed == sequence.Length);
+            //}
+            //blockSequence = new ReadOnlySequence<byte>(buf, 0, totalWritten);
+            var buf = new byte[600000];
+            var count = strm.Read(buf);
+            blockSequence = new ReadOnlySequence<byte>(buf, 0, count);
+            return new()
+            {
+                MinimumReaderVersion = type.MinimumReaderVersion,
+                Version = type.Version,
+                Name = type.Name == KnownTypeNames.EventBlockCompressed ? KnownTypeNames.EventBlock : KnownTypeNames.StackBlock
+            };
+        }
+
+        private void PerformFourByteAlignment(ref SequenceReader<byte> sequenceReader)
         {
             var offset = (BytesConsumed + sequenceReader.Consumed) % 4;
             var padding = (4 - offset) % 4;
@@ -196,7 +240,6 @@ namespace Nettrace
             {
                 sequenceReader.Advance(padding);
             }
-            return padding;
         }
 
         private bool TryReadMetadataBlock(ref SequenceReader<byte> sequenceReader)
@@ -206,7 +249,7 @@ namespace Nettrace
                 return false;
             }
 
-            var padding = PerformFourByteAlignment(ref sequenceReader);
+            PerformFourByteAlignment(ref sequenceReader);
 
             if (BlockSize > sequenceReader.Remaining)
             {
@@ -418,7 +461,6 @@ namespace Nettrace
             var block = new NettraceBlock()
             {
                 Type = type,
-                AlignmentPadding = 0,
                 Size = blockSize,
                 BlockBody = blockSequence
             };

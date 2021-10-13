@@ -4,7 +4,7 @@ using System.Threading.Tasks;
 
 namespace Nettrace
 {
-    internal interface IBlockProcessor
+    public interface IBlockProcessor
     {
         void ProcessBlock(NettraceBlock block);
     }

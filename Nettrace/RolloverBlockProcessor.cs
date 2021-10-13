@@ -9,7 +9,7 @@ using System.Text;
 
 namespace Nettrace
 {
-    internal class RolloverBlockProcessor : IBlockProcessor, IDisposable
+    public class RolloverBlockProcessor : IBlockProcessor, IDisposable
     {
         private readonly string _directoryPath;
         private static int fileNumber = 0;

@@ -9,7 +9,7 @@ using System.Text;
 
 namespace Nettrace
 {
-    internal class CopyBlockProcessor : IBlockProcessor, IDisposable
+    public class CopyBlockProcessor : IBlockProcessor, IDisposable
     {
         private readonly string _filePath;
         private bool _initialized;

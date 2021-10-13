@@ -17,13 +17,16 @@ namespace Nettrace
     {
         private ILogger _logger;
         private int? _readAtLeast = null;
-        //private readonly IBlockProcessor _blockProcessor = new CopyBlockProcessor(@"temp.nettrace");
-        private readonly IBlockProcessor _blockProcessor = new RolloverBlockProcessor(Directory.GetCurrentDirectory());
         private NettraceBlock? _currentBlock = null;
         public long BytesConsumed { get; private set; } = 0;
         public State State { get; private set; } = State.Preamble;
-        public Parser() : this(NullLogger.Instance) { }
-        public Parser(ILogger logger) => _logger = logger;
+        public Parser(IBlockProcessor processor) : this(NullLogger.Instance, processor) { }
+        public Parser(ILogger logger, IBlockProcessor processor)
+        {
+            _blockProcessor = processor;
+            _logger = logger;
+        }
+
         public async Task ProcessAsync(Stream stream, CancellationToken token = default)
         {
             var reader = PipeReader.Create(stream);

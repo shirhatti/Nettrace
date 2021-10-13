@@ -6,6 +6,6 @@ namespace Nettrace
 {
     public interface IBlockProcessor
     {
-        void ProcessBlock(NettraceBlock block);
+        ValueTask ProcessBlockAsync(NettraceBlock block, CancellationToken token);
     }
 }

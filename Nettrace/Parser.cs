@@ -15,7 +15,7 @@ using System.Threading.Tasks;
 
 namespace Nettrace
 {
-    public class Parser : IDisposable
+    public class Parser
     {
         private Dictionary<string, int> _stats = new();
         private ILogger _logger;
@@ -31,7 +31,7 @@ namespace Nettrace
             _logger = logger;
         }
 
-        public async Task ProcessAsync(Stream stream, CancellationToken token = default)
+        public async ValueTask ProcessAsync(Stream stream, CancellationToken token = default)
         {
             var reader = PipeReader.Create(stream);
             while (true)
@@ -61,7 +61,7 @@ namespace Nettrace
                 {
                     if (_currentBlock is not null)
                     {
-                        _blockProcessor.ProcessBlock(_currentBlock.Value);
+                        await _blockProcessor.ProcessBlockAsync(_currentBlock.Value, token);
                         _currentBlock = null;
                     }
                     examined = position;
@@ -147,7 +147,7 @@ namespace Nettrace
             {
                 return false;
             }
-            _logger.LogInformation("Found block of type: {type}", type.Name);
+            _logger.LogTrace("Found block of type: {type}", type.Name);
             _stats.TryAdd(type.Name, 0);
             _stats[type.Name] += 1;
             return type.Name switch
@@ -536,11 +536,6 @@ namespace Nettrace
             Debug.Assert(tag == Tags.EndObject);
 
             return true;
-        }
-
-        public void Dispose()
-        {
-            (_blockProcessor as IDisposable)?.Dispose();
         }
     }
 }

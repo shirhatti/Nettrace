@@ -6,6 +6,8 @@ using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.IO.Pipelines;
 using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace Nettrace
 {
@@ -24,14 +26,14 @@ namespace Nettrace
             _directoryPath = directoryPath;
         }
         [MemberNotNull(nameof(_writer))]
-        private void InitializeFile()
+        private async ValueTask InitializeFileAsync(CancellationToken token)
         {
             CloseFile();
             var filePath = Path.Combine(_directoryPath, $"trace_{fileNumber}.nettrace");
             _stream = File.OpenWrite(filePath);
             _writer = new TrackingPipeWriter(PipeWriter.Create(_stream));
             WriteInitialFileContext(_writer);
-            ReplayBlocks(_writer);
+            await ReplayBlocksAsync(_writer, token);
             fileNumber++;
             _initialized = true;
         }
@@ -45,24 +47,24 @@ namespace Nettrace
             Encoding.UTF8.GetBytes("!FastSerialization.1", writer);
         }
 
-        private void ReplayBlocks(TrackingPipeWriter writer)
+        private async ValueTask ReplayBlocksAsync(TrackingPipeWriter writer, CancellationToken token)
         {
             foreach (var blockHolder in _blockHolders)
             {
-                ProcessBlockInternal(blockHolder.Block);
+                await ProcessBlockInternalAsync(blockHolder.Block, token);
             }
         }
 
-        public void ProcessBlock(NettraceBlock block)
+        public async ValueTask ProcessBlockAsync(NettraceBlock block, CancellationToken token = default)
         {
             if (!_initialized)
             {
-                InitializeFile();
+                await InitializeFileAsync(token);
             }
             Debug.Assert(_writer is not null);
             if (_writer.WrittenCount > MaximumFileSize)
             {
-                InitializeFile();
+                await InitializeFileAsync(token);
                 // This may cause an issue with rundown
                 Debug.Assert(_writer.WrittenCount <= MaximumFileSize);
             }
@@ -72,10 +74,10 @@ namespace Nettrace
                 _blockHolders.Add(BlockHolder.Create(block));
             }
 
-            ProcessBlockInternal(block);
+            await ProcessBlockInternalAsync(block, token);
         }
 
-        private void ProcessBlockInternal(NettraceBlock block)
+        private async ValueTask ProcessBlockInternalAsync(NettraceBlock block, CancellationToken token)
         {
             Debug.Assert(_writer is not null);
             // Write opening tag
@@ -98,7 +100,7 @@ namespace Nettrace
             _writer.WriteByte((byte)Tags.EndObject);
 
             // TODO: Async
-            _writer.FlushAsync().GetAwaiter().GetResult();
+            await _writer.FlushAsync(token);
         }
 
         private void WritePadding(NettraceBlock block)

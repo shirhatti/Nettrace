@@ -52,21 +52,29 @@ namespace Nettrace
                 SequencePosition consumed = result.Buffer.Start;
                 SequencePosition examined = result.Buffer.End;
 
-                // Try adding loop around try parse
-
-                var parseResult = TryParse(result, out var position);
-
-                // Console.WriteLine($"\t{parseResult}");
-                if (parseResult)
+                SequencePosition position;
+                var buffer = result.Buffer;
+                do
                 {
-                    if (_currentBlock is not null)
+                    var parseResult = TryParse(buffer, out position);
+                    buffer = buffer.Slice(position);
+
+                    // Console.WriteLine($"\t{parseResult}");
+                    if (parseResult)
                     {
-                        await _blockProcessor.ProcessBlockAsync(_currentBlock.Value, token);
-                        _currentBlock = null;
+                        if (_currentBlock is not null)
+                        {
+                            await _blockProcessor.ProcessBlockAsync(_currentBlock.Value, token);
+                            _currentBlock = null;
+                        }
+                        consumed = position;
                     }
-                    examined = position;
-                    consumed = position;
+                    else
+                    {
+                        break;
+                    }
                 }
+                while (!position.Equals(result.Buffer.End));
 
                 if (result.IsCompleted)
                 {
@@ -82,10 +90,9 @@ namespace Nettrace
             }
         }
 
-        private bool TryParse(ReadResult readResult, out SequencePosition position)
+        private bool TryParse(ReadOnlySequence<byte> buffer, out SequencePosition position)
         {
             position = default;
-            var buffer = readResult.Buffer;
             var sequenceReader = new SequenceReader<byte>(buffer);
             var result = State switch
             {

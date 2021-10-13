@@ -9,6 +9,9 @@
   <ItemGroup>
     <PackageReference Include="System.IO.Pipelines" Version="6.0.0-rc.1.21451.13" />
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="5.0.0" />
+
+    <PackageReference Include="Microsoft.Diagnostics.NETCore.Client" Version="0.2.217401" />
+    <PackageReference Include="Microsoft.Diagnostics.Tracing.TraceEvent" Version="2.0.66" />
   </ItemGroup>
 
 </Project>

@@ -204,32 +204,25 @@ namespace Nettrace
 
         private NettraceType Decompress(ref ReadOnlySequence<byte> blockSequence, NettraceType type)
         {
-            using var strm = new BrotliStream(new MemoryStream(blockSequence.ToArray()), CompressionMode.Decompress);
-            //var buf = new byte[100000];
-            //using var decoder = new BrotliDecoder();
-            //var totalWritten = 0;
-            //foreach (var sequence in blockSequence)
-            //{
-            //    OperationStatus status;
-            //    do
-            //    {
-            //        status = decoder.Decompress(sequence.Span, buf, out var consumed, out var written);
-            //        totalWritten += written;
-            //    }
-            //    while (status != OperationStatus.Done && status != OperationStatus.DestinationTooSmall);
-            //    //decoder.Decompress(sequence.Span, , out var consumed, out var written);
-            //    //Debug.Assert(consumed == sequence.Length);
-            //}
-            //blockSequence = new ReadOnlySequence<byte>(buf, 0, totalWritten);
-            var buf = new byte[600000];
-            var count = strm.Read(buf);
-            blockSequence = new ReadOnlySequence<byte>(buf, 0, count);
-            return new()
+            var source = ArrayPool<byte>.Shared.Rent((int)blockSequence.Length);
+            try
             {
-                MinimumReaderVersion = type.MinimumReaderVersion,
-                Version = type.Version,
-                Name = type.Name == KnownTypeNames.EventBlockCompressed ? KnownTypeNames.EventBlock : KnownTypeNames.StackBlock
-            };
+                blockSequence.CopyTo(source);
+                using var strm = new BrotliStream(new MemoryStream(source, 0, (int)blockSequence.Length), CompressionMode.Decompress);
+                var buf = new byte[600000];
+                var count = strm.Read(buf);
+                blockSequence = new ReadOnlySequence<byte>(buf, 0, count);
+                return new()
+                {
+                    MinimumReaderVersion = type.MinimumReaderVersion,
+                    Version = type.Version,
+                    Name = type.Name == KnownTypeNames.EventBlockCompressed ? KnownTypeNames.EventBlock : KnownTypeNames.StackBlock
+                };
+            }
+            finally
+            {
+                ArrayPool<byte>.Shared.Return(source);
+            }
         }
 
         private void PerformFourByteAlignment(ref SequenceReader<byte> sequenceReader)

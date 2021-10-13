@@ -6,10 +6,12 @@ using System.IO;
 using System.IO.Compression;
 using System.IO.Pipelines;
 using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace Nettrace
 {
-    internal class CompressBlockProcessor : IBlockProcessor, IDisposable
+    public class CompressBlockProcessor : IBlockProcessor, IDisposable
     {
         private readonly string _filePath;
         private bool _initialized;
@@ -39,7 +41,7 @@ namespace Nettrace
             Encoding.UTF8.GetBytes("!FastSerialization.1", writer);
         }
 
-        public void ProcessBlock(NettraceBlock block)
+        public async ValueTask ProcessBlockAsync(NettraceBlock block, CancellationToken token = default)
         {
             if (!_initialized)
             {
@@ -53,6 +55,19 @@ namespace Nettrace
             // TODO: Write block header
             ProcessBlockHeader(block.Type);
 
+            ProcessBlockBodyPreamble(block);
+
+            ProcessBlockBody(block);
+
+            // Write closing tag
+            _writer.WriteByte((byte)Tags.EndObject);
+
+            await _writer.FlushAsync(token);
+        }
+
+        private void ProcessBlockBodyPreamble(NettraceBlock block)
+        {
+            Debug.Assert(_writer is not null);
             if (block.Type.Name != KnownTypeNames.Trace && block.Type.Name != KnownTypeNames.EventBlock && block.Type.Name != KnownTypeNames.StackBlock)
             {
                 // padding should run before writing block size
@@ -64,14 +79,6 @@ namespace Nettrace
                 Span<byte> span = stackalloc byte[padding];
                 _writer.Write(span);
             }
-
-            ProcessBlockBody(block);
-
-            // Write closing tag
-            _writer.WriteByte((byte)Tags.EndObject);
-
-            // TODO: Async
-            _writer.FlushAsync().GetAwaiter().GetResult();
         }
 
         private int GetPadding(NettraceBlock block)

@@ -35,7 +35,7 @@ namespace Nettrace
             // Write Preamble
             Encoding.UTF8.GetBytes("Nettrace", writer);
             // Write StreamHeader
-            writer.Write(BitConverter.GetBytes(20));
+            writer.WriteInt(20);
             Encoding.UTF8.GetBytes("!FastSerialization.1", writer);
         }
 
@@ -71,7 +71,7 @@ namespace Nettrace
                 var padding = GetPadding(block);
 
                 // Write block size
-                _writer.Write(BitConverter.GetBytes(block.Size));
+                _writer.WriteInt(block.Size);
                 // Write padding
                 Span<byte> span = stackalloc byte[padding];
                 _writer.Write(span);
@@ -102,9 +102,9 @@ namespace Nettrace
             Debug.Assert(_writer is not null);
             _writer.WriteByte((byte)Tags.BeginPrivateObject);
             _writer.WriteByte((byte)Tags.NullReference);
-            _writer.Write(BitConverter.GetBytes(type.Version));
-            _writer.Write(BitConverter.GetBytes(type.MinimumReaderVersion));
-            _writer.Write(BitConverter.GetBytes(type.Name.Length));
+            _writer.WriteInt(type.Version);
+            _writer.WriteInt(type.MinimumReaderVersion);
+            _writer.WriteInt(type.Name.Length);
             Encoding.UTF8.GetBytes(type.Name, _writer);
             _writer.WriteByte((byte)Tags.EndObject);
         }

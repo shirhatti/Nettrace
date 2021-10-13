@@ -37,7 +37,7 @@ namespace Nettrace
             // Write Preamble
             Encoding.UTF8.GetBytes("Nettrace", writer);
             // Write StreamHeader
-            writer.Write(BitConverter.GetBytes(20));
+            writer.WriteInt(20);
             Encoding.UTF8.GetBytes("!FastSerialization.1", writer);
         }
 
@@ -74,7 +74,7 @@ namespace Nettrace
                 var padding = GetPadding(block);
 
                 // Write block size
-                _writer.Write(BitConverter.GetBytes(block.Size));
+                _writer.WriteInt(block.Size);
                 // Write padding
                 Span<byte> span = stackalloc byte[padding];
                 _writer.Write(span);
@@ -105,21 +105,21 @@ namespace Nettrace
             Debug.Assert(_writer is not null);
             _writer.WriteByte((byte)Tags.BeginPrivateObject);
             _writer.WriteByte((byte)Tags.NullReference);
-            _writer.Write(BitConverter.GetBytes(type.Version));
-            _writer.Write(BitConverter.GetBytes(type.MinimumReaderVersion));
+            _writer.WriteInt(type.Version);
+            _writer.WriteInt(type.MinimumReaderVersion);
             if (type.Name == KnownTypeNames.EventBlock)
             {
-                _writer.Write(BitConverter.GetBytes(KnownTypeNames.EventBlockCompressed.Length));
+                _writer.WriteInt(KnownTypeNames.EventBlockCompressed.Length);
                 Encoding.UTF8.GetBytes(KnownTypeNames.EventBlockCompressed, _writer);
             }
             else if (type.Name == KnownTypeNames.StackBlock)
             {
-                _writer.Write(BitConverter.GetBytes(KnownTypeNames.StackBlockCompressed.Length));
+                _writer.WriteInt(KnownTypeNames.StackBlockCompressed.Length);
                 Encoding.UTF8.GetBytes(KnownTypeNames.StackBlockCompressed, _writer);
             }
             else
             {
-                _writer.Write(BitConverter.GetBytes(type.Name.Length));
+                _writer.WriteInt(type.Name.Length);
                 Encoding.UTF8.GetBytes(type.Name, _writer);
             }
             _writer.WriteByte((byte)Tags.EndObject);
@@ -157,9 +157,8 @@ namespace Nettrace
             Debug.Assert(status == OperationStatus.Done);
             totalWritten += written2;
 
-            var size = BitConverter.GetBytes(totalWritten);
             // Write size
-            size.CopyTo(memory);
+            BitConverter.TryWriteBytes(memory.Span, totalWritten);
             _writer.Advance(totalWritten + prefixLength);
         }
 

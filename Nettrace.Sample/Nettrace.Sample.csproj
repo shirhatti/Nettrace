@@ -8,7 +8,7 @@
     <IsPackable>false</IsPackable>
   </PropertyGroup>
 
-  <ItemGroup Condition="'$(CI)' == true">
+  <ItemGroup Condition="'$(CI)' != 'true'">
     <Content Include="trace.nettrace">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </Content>

@@ -11,14 +11,14 @@ using System.Threading.Tasks;
 
 namespace Nettrace
 {
-    public class CompressBlockProcessor : IBlockProcessor, IDisposable
+    public class DecompressBlockProcessor : IBlockProcessor, IDisposable
     {
         private readonly string _filePath;
         private bool _initialized;
         private Stream? _stream;
         private TrackingPipeWriter? _writer;
 
-        public CompressBlockProcessor(string filePath)
+        public DecompressBlockProcessor(string filePath)
         {
             _filePath = filePath;
         }
@@ -68,7 +68,8 @@ namespace Nettrace
         private void ProcessBlockBodyPreamble(NettraceBlock block)
         {
             Debug.Assert(_writer is not null);
-            if (block.Type.Name != KnownTypeNames.Trace && block.Type.Name != KnownTypeNames.EventBlock && block.Type.Name != KnownTypeNames.StackBlock)
+            if (block.Type.Name != KnownTypeNames.Trace && block.Type.Name != KnownTypeNames.EventBlockCompressed
+                && block.Type.Name != KnownTypeNames.StackBlockCompressed)
             {
                 // padding should run before writing block size
                 var padding = GetPadding(block);
@@ -107,15 +108,15 @@ namespace Nettrace
             _writer.WriteByte((byte)Tags.NullReference);
             _writer.Write(BitConverter.GetBytes(type.Version));
             _writer.Write(BitConverter.GetBytes(type.MinimumReaderVersion));
-            if (type.Name == KnownTypeNames.EventBlock)
+            if (type.Name == KnownTypeNames.EventBlockCompressed)
             {
-                _writer.Write(BitConverter.GetBytes(KnownTypeNames.EventBlockCompressed.Length));
-                Encoding.UTF8.GetBytes(KnownTypeNames.EventBlockCompressed, _writer);
+                _writer.Write(BitConverter.GetBytes(KnownTypeNames.EventBlock.Length));
+                Encoding.UTF8.GetBytes(KnownTypeNames.EventBlock, _writer);
             }
-            else if (type.Name == KnownTypeNames.StackBlock)
+            else if (type.Name == KnownTypeNames.StackBlockCompressed)
             {
-                _writer.Write(BitConverter.GetBytes(KnownTypeNames.StackBlockCompressed.Length));
-                Encoding.UTF8.GetBytes(KnownTypeNames.StackBlockCompressed, _writer);
+                _writer.Write(BitConverter.GetBytes(KnownTypeNames.StackBlock.Length));
+                Encoding.UTF8.GetBytes(KnownTypeNames.StackBlock, _writer);
             }
             else
             {
@@ -127,40 +128,41 @@ namespace Nettrace
 
         private void ProcessBlockBody(NettraceBlock block)
         {
-            if (block.Type.Name != KnownTypeNames.EventBlock && block.Type.Name != KnownTypeNames.StackBlock)
+            if (block.Type.Name != KnownTypeNames.EventBlockCompressed && block.Type.Name != KnownTypeNames.StackBlockCompressed)
             {
                 ProcessBlockBodyUncompressed(block.BlockBody);
                 return;
             }
 
-            var blockSequence = block.BlockBody;
-            var maxLength = BrotliEncoder.GetMaxCompressedLength((int)blockSequence.Length);
             var padding = GetPadding(block);
             var prefixLength = padding + sizeof(int);
-            var memory = _writer!.GetMemory(maxLength + prefixLength);
-            // clear padding bits
-            memory.Slice(0, prefixLength).Span.Clear();
-            using var encoder = new BrotliEncoder(quality: 9, window: 10);
+            using var decoder = new BrotliDecoder();
 
-            var slicedMemory = memory.Slice(prefixLength);
-            var totalWritten = 0;
-            OperationStatus status;
-            foreach (var sequence in blockSequence)
+            var source = ArrayPool<byte>.Shared.Rent((int)block.BlockBody.Length);
+            block.BlockBody.CopyTo(source);
+            var written = 0;
+            Memory<byte> memory;
+            try
             {
-                status = encoder.Compress(sequence.Span, slicedMemory.Span, out var consumed, out var written, false);
-                Debug.Assert(consumed == sequence.Span.Length);
-                Debug.Assert(status == OperationStatus.Done);
-                slicedMemory = slicedMemory.Slice(written);
-                totalWritten += written;
+                var length = prefixLength + (int)block.BlockBody.Length;
+                memory = _writer!.GetMemory(length);
+                while (!BrotliDecoder.TryDecompress(source.AsSpan(0, (int)block.BlockBody.Length), memory.Slice(prefixLength).Span, out written))
+                {
+                    length = memory.Length * 2;
+                    memory = _writer!.GetMemory(length);
+                }
             }
-            status = encoder.Compress(ReadOnlySpan<byte>.Empty, slicedMemory.Span, out var _, out var written2, true);
-            Debug.Assert(status == OperationStatus.Done);
-            totalWritten += written2;
+            finally
+            {
+                ArrayPool<byte>.Shared.Return(source);
+            }
 
-            var size = BitConverter.GetBytes(totalWritten);
+            var size = BitConverter.GetBytes(written);
             // Write size
             size.CopyTo(memory);
-            _writer.Advance(totalWritten + prefixLength);
+            // clear padding bits
+            memory.Slice(size.Length, padding).Span.Clear();
+            _writer.Advance(written + prefixLength);
         }
 
         private void ProcessBlockBodyUncompressed(ReadOnlySequence<byte> blockSequence)

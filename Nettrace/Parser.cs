@@ -178,51 +178,21 @@ namespace Nettrace
                 return false;
             }
             var blockSequence = sequenceReader.UnreadSequence.Slice(0, BlockSize);
-            var originalBlockSize = BlockSize;
-
-            if (type.Name == KnownTypeNames.EventBlockCompressed || type.Name == KnownTypeNames.StackBlockCompressed)
-            {
-                type = Decompress(ref blockSequence, type);
-            }
 
             var block = new NettraceBlock()
             {
                 Type = type,
-                Size = (int)blockSequence.Length,
+                Size = BlockSize,
                 BlockBody = blockSequence
             };
             _currentBlock = block;
-            //_blockProcessor.ProcessBlock(block);
-            sequenceReader.Advance(originalBlockSize);
+            sequenceReader.Advance(BlockSize);
             if (!sequenceReader.TryRead(out var tagValue))
             {
                 return false;
             }
             Debug.Assert((Tags)tagValue == Tags.EndObject);
             return true;
-        }
-
-        private NettraceType Decompress(ref ReadOnlySequence<byte> blockSequence, NettraceType type)
-        {
-            var source = ArrayPool<byte>.Shared.Rent((int)blockSequence.Length);
-            try
-            {
-                blockSequence.CopyTo(source);
-                using var strm = new BrotliStream(new MemoryStream(source, 0, (int)blockSequence.Length), CompressionMode.Decompress);
-                var buf = new byte[600000];
-                var count = strm.Read(buf);
-                blockSequence = new ReadOnlySequence<byte>(buf, 0, count);
-                return new()
-                {
-                    MinimumReaderVersion = type.MinimumReaderVersion,
-                    Version = type.Version,
-                    Name = type.Name == KnownTypeNames.EventBlockCompressed ? KnownTypeNames.EventBlock : KnownTypeNames.StackBlock
-                };
-            }
-            finally
-            {
-                ArrayPool<byte>.Shared.Return(source);
-            }
         }
 
         private void PerformFourByteAlignment(ref SequenceReader<byte> sequenceReader)

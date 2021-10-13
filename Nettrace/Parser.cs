@@ -17,7 +17,8 @@ namespace Nettrace
     {
         private ILogger _logger;
         private int? _readAtLeast = null;
-        private readonly IBlockProcessor _blockProcessor = new CopyBlockProcessor(@"temp.nettrace");
+        //private readonly IBlockProcessor _blockProcessor = new CopyBlockProcessor(@"temp.nettrace");
+        private readonly IBlockProcessor _blockProcessor = new RolloverBlockProcessor(Directory.GetCurrentDirectory());
         private NettraceBlock? _currentBlock = null;
         public long BytesConsumed { get; private set; } = 0;
         public State State { get; private set; } = State.Preamble;

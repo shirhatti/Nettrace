@@ -7,7 +7,8 @@ using System.IO;
 
 var loggerFactory = LoggerFactory.Create(logging => logging.AddConsole());
 var stopwatch = new Stopwatch();
-using var stream = File.OpenRead("trace.nettrace");
+//using var stream = File.OpenRead("trace_1.nettrace");
+using var stream = File.OpenRead("serp.nettrace");
 var logger = loggerFactory.CreateLogger<Parser>();
 using var parser = new Parser();
 stopwatch.Start();

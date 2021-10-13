@@ -10,9 +10,8 @@ namespace Nettrace
     public struct NettraceBlock
     {
         public NettraceType Type { get; init; }
-        public ReadOnlySequence<byte> BlockBody { get; init; }
+        public ReadOnlySequence<byte> BlockBody { get; set; }
         public long AlignmentPadding { get; init; }
-        public int Size { get; init; }
-
+        public int Size { get; set; }
     }
 }

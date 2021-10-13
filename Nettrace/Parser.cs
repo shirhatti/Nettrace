@@ -411,8 +411,8 @@ namespace Nettrace
 
         private bool TryReadTraceObject(ref SequenceReader<byte> sequenceReader, NettraceType type)
         {
-            var trace = new TraceObject();
-            var span = MemoryMarshal.Cast<TraceObject, byte>(MemoryMarshal.CreateSpan(ref trace, 1));
+            var trace = new TraceBlock();
+            var span = MemoryMarshal.Cast<TraceBlock, byte>(MemoryMarshal.CreateSpan(ref trace, 1));
 
             if (!sequenceReader.TryCopyTo(span))
             {

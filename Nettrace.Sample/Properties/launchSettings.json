@@ -1,0 +1,10 @@
+{
+  "profiles": {
+    "Nettrace.Sample": {
+      "commandName": "Project"
+    },
+    "Docker": {
+      "commandName": "Docker"
+    }
+  }
+}

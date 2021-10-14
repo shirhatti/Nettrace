@@ -24,9 +24,9 @@ namespace Nettrace
         private List<BlockHolder> _blockHolders = new List<BlockHolder>();
 #if REPLAY_STACK_BLOCKS
         private List<BlockHolder> _stackBlockHolders = new List<BlockHolder>();
+        private int _lastSPBlockIndex = 0;
 #endif
         private static long MaximumFileSize = 10_000_000;
-        private int _lastSPBlockNumber = 0;
         private int _currentBlockNumber = 0;
 
         public RolloverBlockProcessor(string directoryPath)
@@ -68,14 +68,13 @@ namespace Nettrace
                 await ProcessBlockInternalAsync(blockHolder.Block, token);
             }
 #if REPLAY_STACK_BLOCKS
-            var index = _stackBlockHolders.FindIndex(x => x.BlockNumber > _lastSPBlockNumber);
-            if (index > 0)
+            if (_lastSPBlockIndex > 0)
             {
-                foreach (var blockHolder in _stackBlockHolders.GetRange(0, index - 1))
+                foreach (var blockHolder in _stackBlockHolders.GetRange(0, _lastSPBlockIndex - 1))
                 {
                     blockHolder.Dispose();
                 }
-                _stackBlockHolders = _stackBlockHolders.GetRange(index, _stackBlockHolders.Count - index);
+                _stackBlockHolders = _stackBlockHolders.GetRange(_lastSPBlockIndex, _stackBlockHolders.Count - _lastSPBlockIndex);
             }
 #endif
         }
@@ -98,15 +97,17 @@ namespace Nettrace
             {
                 _blockHolders.Add(BlockHolder.Create(block, _currentBlockNumber));
             }
+#if REPLAY_STACK_BLOCKS
             if (block.Type.Name == KnownTypeNames.SPBlock)
             {
-                _lastSPBlockNumber = _currentBlockNumber;
+                _lastSPBlockIndex = _stackBlockHolders.Count;
             }
-#if REPLAY_STACK_BLOCKS
-            if (block.Type.Name == KnownTypeNames.StackBlock)
+            if (block.Type.Name == KnownTypeNames.StackBlock
+                || block.Type.Name == KnownTypeNames.SPBlock)
             {
                 _stackBlockHolders.Add(BlockHolder.Create(block, _currentBlockNumber));
             }
+
 #else
             // We can just entirely skip the block since it's useless now
             if (block.Type.Name == KnownTypeNames.StackBlock)

@@ -107,6 +107,13 @@ namespace Nettrace
             {
                 _stackBlockHolders.Add(BlockHolder.Create(block, _currentBlockNumber));
             }
+#else
+            // We can just entirely skip the block since it's useless now
+            if (block.Type.Name == KnownTypeNames.StackBlock)
+            {
+                _currentBlockNumber++;
+                return;
+            }
 #endif
             await ProcessBlockInternalAsync(block, token);
             _currentBlockNumber++;

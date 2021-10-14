@@ -1,10 +1,13 @@
-﻿using System;
+﻿// #define REPLAY_STACK_BLOCKS
+
+using System;
 using System.Buffers;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.IO.Pipelines;
+using System.Linq;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -18,8 +21,13 @@ namespace Nettrace
         private bool _initialized;
         private Stream? _stream;
         private TrackingPipeWriter? _writer;
-        private IList<BlockHolder> _blockHolders = new List<BlockHolder>();
+        private List<BlockHolder> _blockHolders = new List<BlockHolder>();
+#if REPLAY_STACK_BLOCKS
+        private List<BlockHolder> _stackBlockHolders = new List<BlockHolder>();
+#endif
         private static long MaximumFileSize = 10_000_000;
+        private int _lastSPBlockNumber = 0;
+        private int _currentBlockNumber = 0;
 
         public RolloverBlockProcessor(string directoryPath)
         {
@@ -49,10 +57,27 @@ namespace Nettrace
 
         private async ValueTask ReplayBlocksAsync(TrackingPipeWriter writer, CancellationToken token)
         {
-            foreach (var blockHolder in _blockHolders)
+#if REPLAY_STACK_BLOCKS
+            var mergedBlockHolders = _blockHolders.Concat(_stackBlockHolders)
+                                                  .OrderBy(x => x.BlockNumber);
+#else
+            var mergedBlockHolders = _blockHolders;
+#endif
+            foreach (var blockHolder in mergedBlockHolders)
             {
                 await ProcessBlockInternalAsync(blockHolder.Block, token);
             }
+#if REPLAY_STACK_BLOCKS
+            var index = _stackBlockHolders.FindIndex(x => x.BlockNumber > _lastSPBlockNumber);
+            if (index > 0)
+            {
+                foreach (var blockHolder in _stackBlockHolders.GetRange(0, index - 1))
+                {
+                    blockHolder.Dispose();
+                }
+                _stackBlockHolders = _stackBlockHolders.GetRange(index, _stackBlockHolders.Count - index);
+            }
+#endif
         }
 
         public async ValueTask ProcessBlockAsync(NettraceBlock block, CancellationToken token = default)
@@ -71,10 +96,20 @@ namespace Nettrace
             if (block.Type.Name == KnownTypeNames.Trace
                 || block.Type.Name == KnownTypeNames.MetadataBlock )
             {
-                _blockHolders.Add(BlockHolder.Create(block));
+                _blockHolders.Add(BlockHolder.Create(block, _currentBlockNumber));
             }
-
+            if (block.Type.Name == KnownTypeNames.SPBlock)
+            {
+                _lastSPBlockNumber = _currentBlockNumber;
+            }
+#if REPLAY_STACK_BLOCKS
+            if (block.Type.Name == KnownTypeNames.StackBlock)
+            {
+                _stackBlockHolders.Add(BlockHolder.Create(block, _currentBlockNumber));
+            }
+#endif
             await ProcessBlockInternalAsync(block, token);
+            _currentBlockNumber++;
         }
 
         private async ValueTask ProcessBlockInternalAsync(NettraceBlock block, CancellationToken token)

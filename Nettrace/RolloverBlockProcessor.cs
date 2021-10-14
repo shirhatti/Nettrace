@@ -193,6 +193,12 @@ namespace Nettrace
             {
                 blockHolder?.Dispose();
             }
+#if REPLAY_STACK_BLOCKS
+            foreach (var blockHolder in _stackBlockHolders)
+            {
+                blockHolder?.Dispose();
+            }
+#endif
         }
 
         private void CloseFile()

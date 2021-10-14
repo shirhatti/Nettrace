@@ -14,10 +14,8 @@ var process = Process.GetCurrentProcess();
 //using var stream = File.OpenRead("trace_1.nettrace");
 using var stream = File.OpenRead("trace.nettrace");
 
-//using var blockProcessor = new DecompressBlockProcessor("temp.nettrace");
 using var blockProcessor = new CopyBlockProcessor(@"temp.nettrace");
 //using var blockProcessor = new RolloverBlockProcessor(Directory.GetCurrentDirectory());
-//using var blockProcessor = new CompressBlockProcessor("temp.nettrace");
 
 var parser = new Parser(logger, blockProcessor);
 

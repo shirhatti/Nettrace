@@ -1,7 +1,4 @@
-﻿// #define REPLAY_STACK_BLOCKS
-
-using System;
-using System.Buffers;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
@@ -14,16 +11,14 @@ namespace Nettrace
 {
     public class RolloverBlockProcessor : IBlockProcessor, IDisposable
     {
+        private static bool replayStackBlocks = true;
         private readonly string _directoryPath;
         private static int fileNumber = 0;
         private bool _initialized;
         private Stream? _stream;
         private TrackingPipeWriter? _writer;
-        private List<BlockHolder> _blockHolders = new List<BlockHolder>();
-#if REPLAY_STACK_BLOCKS
-        private List<BlockHolder> _stackBlockHolders = new List<BlockHolder>();
-        private int _lastSPBlockIndex = 0;
-#endif
+        private LinkedList<BlockHolder> _blockHolders = new();
+        private LinkedListNode<BlockHolder>? _lastSPBlockIndex;
         private static long MaximumFileSize = 10_000_000;
         private int _currentBlockNumber = 0;
 
@@ -39,33 +34,26 @@ namespace Nettrace
             _stream = File.OpenWrite(filePath);
             _writer = new TrackingPipeWriter(PipeWriter.Create(_stream));
             BlockHelpers.WriteInitialFileContext(_writer);
-            await ReplayBlocksAsync(_writer, token);
+            await ReplayBlocksAsync(token);
             fileNumber++;
             _initialized = true;
         }
 
-        private async ValueTask ReplayBlocksAsync(TrackingPipeWriter writer, CancellationToken token)
+        private async ValueTask ReplayBlocksAsync(CancellationToken token)
         {
-#if REPLAY_STACK_BLOCKS
-            var mergedBlockHolders = _blockHolders.Concat(_stackBlockHolders)
-                                                  .OrderBy(x => x.BlockNumber);
-#else
-            var mergedBlockHolders = _blockHolders;
-#endif
-            foreach (var blockHolder in mergedBlockHolders)
+            var cursor = _blockHolders.First;
+            while (cursor != null)
             {
-                await ProcessBlockInternalAsync(blockHolder.Block, token);
-            }
-#if REPLAY_STACK_BLOCKS
-            if (_lastSPBlockIndex > 0)
-            {
-                foreach (var blockHolder in _stackBlockHolders.GetRange(0, _lastSPBlockIndex - 1))
+                await ProcessBlockInternalAsync(cursor!.Value.Block, token);
+                var advance = cursor.Next;
+                if (cursor.Value.Block.Type.Name == KnownTypeNames.StackBlock
+                    || (cursor.Value.Block.Type.Name == KnownTypeNames.SPBlock && cursor != _lastSPBlockIndex))
                 {
-                    blockHolder.Dispose();
+                    cursor.Value.Dispose();
+                    _blockHolders.Remove(cursor);
                 }
-                _stackBlockHolders = _stackBlockHolders.GetRange(_lastSPBlockIndex, _stackBlockHolders.Count - _lastSPBlockIndex);
+                cursor = advance;
             }
-#endif
         }
 
         public async ValueTask ProcessBlockAsync(NettraceBlock block, CancellationToken token = default)
@@ -81,30 +69,25 @@ namespace Nettrace
                 // This may cause an issue with rundown
                 Debug.Assert(_writer.WrittenCount <= MaximumFileSize);
             }
-            if (block.Type.Name == KnownTypeNames.Trace
-                || block.Type.Name == KnownTypeNames.MetadataBlock )
-            {
-                _blockHolders.Add(BlockHolder.Create(block, _currentBlockNumber));
-            }
-#if REPLAY_STACK_BLOCKS
             if (block.Type.Name == KnownTypeNames.SPBlock)
             {
-                _lastSPBlockIndex = _stackBlockHolders.Count;
+                _lastSPBlockIndex = _blockHolders.Last;
             }
-            if (block.Type.Name == KnownTypeNames.StackBlock
-                || block.Type.Name == KnownTypeNames.SPBlock)
-            {
-                _stackBlockHolders.Add(BlockHolder.Create(block, _currentBlockNumber));
-            }
-
-#else
             // We can just entirely skip the block since it's useless now
-            if (block.Type.Name == KnownTypeNames.StackBlock)
+            if (block.Type.Name == KnownTypeNames.StackBlock && !replayStackBlocks)
             {
                 _currentBlockNumber++;
                 return;
             }
-#endif
+
+            if (block.Type.Name == KnownTypeNames.Trace
+                || block.Type.Name == KnownTypeNames.MetadataBlock
+                || block.Type.Name == KnownTypeNames.StackBlock
+                || block.Type.Name == KnownTypeNames.SPBlock)
+            {
+                _blockHolders.AddLast(BlockHolder.Create(block, _currentBlockNumber));
+            }
+
             await ProcessBlockInternalAsync(block, token);
             _currentBlockNumber++;
         }
@@ -112,7 +95,7 @@ namespace Nettrace
         private ValueTask ProcessBlockInternalAsync(NettraceBlock block, CancellationToken token)
         {
             Debug.Assert(_writer is not null);
-            return new (BlockHelpers.ProcessBlock(_writer, block, token).AsTask());
+            return new(BlockHelpers.ProcessBlock(_writer, block, token).AsTask());
         }
 
         public void Dispose()
@@ -122,12 +105,6 @@ namespace Nettrace
             {
                 blockHolder?.Dispose();
             }
-#if REPLAY_STACK_BLOCKS
-            foreach (var blockHolder in _stackBlockHolders)
-            {
-                blockHolder?.Dispose();
-            }
-#endif
         }
 
         private void CloseFile()

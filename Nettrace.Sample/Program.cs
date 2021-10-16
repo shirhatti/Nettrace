@@ -12,10 +12,10 @@ var stopwatch = new Stopwatch();
 var process = Process.GetCurrentProcess();
 
 //using var stream = File.OpenRead("trace_1.nettrace");
-using var stream = File.OpenRead("trace.nettrace");
+using var stream = File.OpenRead("serp.nettrace");
 
-using var blockProcessor = new CopyBlockProcessor(@"temp.nettrace");
-//using var blockProcessor = new RolloverBlockProcessor(Directory.GetCurrentDirectory());
+//using var blockProcessor = new CopyBlockProcessor(@"temp.nettrace");
+using var blockProcessor = new RolloverBlockProcessor(Directory.GetCurrentDirectory());
 
 var parser = new Parser(logger, blockProcessor);
 

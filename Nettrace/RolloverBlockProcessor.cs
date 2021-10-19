@@ -42,13 +42,19 @@ namespace Nettrace
         private async ValueTask ReplayBlocksAsync(CancellationToken token)
         {
             var cursor = _blockHolders.First;
+            var removeBlocks = true;
             while (cursor != null)
             {
                 await ProcessBlockInternalAsync(cursor!.Value.Block, token);
                 var advance = cursor.Next;
-                if (cursor.Value.Block.Type.Name == KnownTypeNames.StackBlock
-                    || (cursor.Value.Block.Type.Name == KnownTypeNames.SPBlock && cursor != _lastSPBlockIndex))
+                if ( (cursor.Value.Block.Type.Name == KnownTypeNames.StackBlock
+                    || cursor.Value.Block.Type.Name == KnownTypeNames.SPBlock)
+                    && removeBlocks)
                 {
+                    if (cursor.Value == _lastSPBlockIndex.Value)
+                    {
+                        removeBlocks = false;
+                    }
                     cursor.Value.Dispose();
                     _blockHolders.Remove(cursor);
                 }
